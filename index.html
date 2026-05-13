@@ -49,13 +49,6 @@ h1 { font-size: 17px; font-weight: 500; margin-bottom: 3px; }
   outline: none;
 }
 .toolbar input:focus { border-color: var(--purple); }
-.chip {
-  font-size: 11px; padding: 4px 10px; border-radius: 20px;
-  border: 0.5px solid var(--border2);
-  color: var(--t2); background: var(--bg);
-  cursor: pointer; user-select: none; white-space: nowrap;
-}
-.chip.on { background: var(--purple-l); color: var(--purple); border-color: var(--purple); }
 /* Timeline */
 #tl-wrap { position: relative; margin-bottom: 3px; }
 #tl { width: 100%; display: block; overflow: visible; }
@@ -137,9 +130,6 @@ h1 { font-size: 17px; font-weight: 500; margin-bottom: 3px; }
 <div class="toolbar">
   <input type="search" id="search" placeholder="Highlight term across all issues…"
          oninput="onSearch(this.value)">
-  <span class="chip on" id="chip-all"   onclick="setFilter('all')">All issues</span>
-  <span class="chip"    id="chip-dream" onclick="setFilter('dream')">Dream mentions only</span>
-  <span class="chip"    id="chip-tag"   onclick="setFilter('tagged')">Tagged stories</span>
 </div>
 
 <div class="lbl">Dream density — click any bar to explore</div>
@@ -191,7 +181,6 @@ const svgEl   = document.getElementById('tl');
 const tipEl   = document.getElementById('tip');
 const tlWrap  = document.getElementById('tl-wrap');
 const bars    = [];
-let filterMode = 'all';
 let searchQ    = '';
 
 function drawTimeline() {
@@ -446,15 +435,7 @@ function renderStory(s) {
   `;
 }
 
-/* ── Filtering & search ── */
-function setFilter(mode) {
-  filterMode = mode;
-  ['all', 'dream', 'tagged'].forEach(m => {
-    document.getElementById('chip-' + m).classList.toggle('on', m === mode);
-  });
-  applyFilter();
-}
-
+/* ── Search ── */
 function onSearch(q) {
   searchQ = q.trim().toLowerCase();
   applyFilter();
@@ -464,22 +445,23 @@ function applyFilter() {
   bars.forEach((rect, i) => {
     const n   = i + 1;
     const cnt = dc(n);
-    const ss  = storiesAt(n);
 
-    let show = true;
-    if (filterMode === 'dream')  show = cnt !== null && cnt > 0;
-    if (filterMode === 'tagged') show = ss.some(s => s.tagged);
-
-    if (searchQ) {
-      // Match against all pre-computed TF-IDF terms for this issue (40 terms, substring match).
-      // Dream-family terms work here just like any other word — search "dream", "nightmare",
-      // "vision" etc. to see which issues they're distinctive in.
-      const allTerms = (TOP_TERMS[n] || TOP_TERMS[String(n)] || []).map(t => t[0]);
-      show = show && allTerms.some(t => t.includes(searchQ));
+    if (!searchQ) {
+      rect.style.opacity = (cnt === 0 || cnt === null) ? '0.22' : '1';
+      return;
     }
 
-    rect.style.opacity = show
-      ? (cnt === 0 || cnt === null ? '0.22' : '1')
+    // Dream-family words: match against raw mention count
+    // Other words: match against TF-IDF top terms
+    const isDreamSearch = Array.from(DREAM_SET).some(
+      w => w.startsWith(searchQ) || searchQ === w
+    );
+    const match = isDreamSearch
+      ? (cnt !== null && cnt > 0)
+      : (TOP_TERMS[n] || TOP_TERMS[String(n)] || []).some(t => t[0].includes(searchQ));
+
+    rect.style.opacity = match
+      ? ((cnt === 0 || cnt === null) ? '0.22' : '1')
       : '0.06';
   });
 }
