@@ -128,7 +128,7 @@ h1 { font-size: 17px; font-weight: 500; margin-bottom: 3px; }
 </p>
 
 <div class="toolbar">
-  <input type="search" id="search" placeholder="Highlight term across all issues…"
+  <input type="search" id="search" placeholder="Filter by title, tag, summary or word…"
          oninput="onSearch(this.value)">
 </div>
 
@@ -257,6 +257,7 @@ function jumpToIssue(n) {
 
 /* ── Lanes ── */
 const lanesEl = document.getElementById('lanes');
+const laneEls = [];
 const LANE_H  = 14;
 const LANE_G  = 3;
 
@@ -281,6 +282,7 @@ function toggleLanes() {
 function drawLanes() {
   const W = lanesEl.parentElement.clientWidth || 900;
   lanesEl.innerHTML = '';
+  laneEls.length = 0;
 
   // Lane view: serials only (multi-issue) or all stories (incl. single-issue).
   // Single-issue stories still appear as clickable pills in the issue panel;
@@ -317,8 +319,12 @@ function drawLanes() {
     lbl.textContent = s.title;
     el.appendChild(lbl);
     el.addEventListener('click', () => renderStory(s));
+    el._story = s;
+    laneEls.push(el);
     lanesEl.appendChild(el);
   });
+
+  applyFilter();   // keep lanes in sync with any active search
 }
 
 /* ── Issue panel ── */
@@ -488,8 +494,25 @@ function renderStory(s) {
 
 /* ── Search ── */
 function onSearch(q) {
-  searchQ = q.trim().toLowerCase();
+  // Live on every keystroke; the query always behaves as if it ends in '*',
+  // so no literal asterisk is needed (and a typed one is ignored).
+  searchQ = q.trim().toLowerCase().replace(/\*/g, '');
   applyFilter();
+}
+
+// Does a story match the current query? Title + summary word-prefix, or a tag
+// stem in either direction. Shared by the timeline and the lanes, so every
+// story's title is searchable wherever it appears.
+function storyMatches(s) {
+  if (!searchQ) return true;
+  const q = searchQ;
+  const words = ((s.title || '') + ' ' + (s.summary || ''))
+    .toLowerCase().split(/[^a-z0-9']+/);
+  if (words.some(w => w && w.startsWith(q))) return true;
+  return (s.tags || []).some(t => {
+    const stem = t.toLowerCase().replace(/\*/g, '');
+    return stem && (stem.startsWith(q) || q.startsWith(stem));
+  });
 }
 
 function applyFilter() {
@@ -502,27 +525,33 @@ function applyFilter() {
       return;
     }
 
-    // Dream-family words also light up issues by raw mention density.
-    const isDreamSearch = Array.from(DREAM_SET).some(
-      w => w.startsWith(searchQ) || searchQ === w
-    );
+    const q = searchQ;   // already lower-cased and stripped of '*' in onSearch
+    let match = false;
 
-    // Search the stories running in this issue: titles, tags and summaries.
-    const storyHit = storiesAt(n).some(s =>
-      (s.title || '').toLowerCase().includes(searchQ) ||
-      (s.tags || []).some(t => t.toLowerCase().includes(searchQ)) ||
-      (s.summary || '').toLowerCase().includes(searchQ)
-    );
+    // Dream-family words light issues up by raw mention density.
+    if (cnt !== null && cnt > 0 &&
+        Array.from(DREAM_SET).some(w => w.startsWith(q) || q.startsWith(w))) {
+      match = true;
+    }
 
-    // …and the per-issue TF-IDF terms from the OCR text.
-    const termHit = (TOP_TERMS[n] || TOP_TERMS[String(n)] || [])
-      .some(t => t[0].includes(searchQ));
+    // Any story running in this issue whose title / summary / tags match.
+    if (!match && storiesAt(n).some(storyMatches)) match = true;
 
-    const match = (isDreamSearch && cnt !== null && cnt > 0) || storyHit || termHit;
+    // Per-issue TF-IDF terms from the OCR text.
+    if (!match) {
+      match = (TOP_TERMS[n] || TOP_TERMS[String(n)] || [])
+        .some(t => t[0].startsWith(q));
+    }
 
     rect.style.opacity = match
       ? ((cnt === 0 || cnt === null) ? '0.22' : '1')
       : '0.06';
+  });
+
+  // Lanes follow the same match, so searching a title surfaces the story
+  // directly in the lane diagram (matches stay lit, others dim).
+  laneEls.forEach(el => {
+    el.style.opacity = storyMatches(el._story) ? '1' : '0.12';
   });
 }
 
