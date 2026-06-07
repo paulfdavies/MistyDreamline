@@ -500,18 +500,17 @@ function onSearch(q) {
   applyFilter();
 }
 
-// Does a story match the current query? Title + summary word-prefix, or a tag
-// stem in either direction. Shared by the timeline and the lanes, so every
-// story's title is searchable wherever it appears.
+// Does a story match the current query? Substring match anywhere in the title
+// or summary, or against a tag stem in either direction. Shared by the
+// timeline and the lanes, so a fragment finds words anywhere they appear.
 function storyMatches(s) {
   if (!searchQ) return true;
   const q = searchQ;
-  const words = ((s.title || '') + ' ' + (s.summary || ''))
-    .toLowerCase().split(/[^a-z0-9']+/);
-  if (words.some(w => w && w.startsWith(q))) return true;
+  if ((s.title || '').toLowerCase().includes(q)) return true;
+  if ((s.summary || '').toLowerCase().includes(q)) return true;
   return (s.tags || []).some(t => {
     const stem = t.toLowerCase().replace(/\*/g, '');
-    return stem && (stem.startsWith(q) || q.startsWith(stem));
+    return stem && (stem.includes(q) || q.includes(stem));
   });
 }
 
@@ -526,22 +525,13 @@ function applyFilter() {
     }
 
     const q = searchQ;   // already lower-cased and stripped of '*' in onSearch
-    let match = false;
 
-    // Dream-family words light issues up by raw mention density.
-    if (cnt !== null && cnt > 0 &&
-        Array.from(DREAM_SET).some(w => w.startsWith(q) || q.startsWith(w))) {
-      match = true;
-    }
-
-    // Any story running in this issue whose title / summary / tags match.
-    if (!match && storiesAt(n).some(storyMatches)) match = true;
-
-    // Per-issue TF-IDF terms from the OCR text.
-    if (!match) {
-      match = (TOP_TERMS[n] || TOP_TERMS[String(n)] || [])
-        .some(t => t[0].startsWith(q));
-    }
+    // Match the stories running in this issue (title / summary / tags) or the
+    // per-issue OCR terms. Substring match, so a fragment finds words anywhere
+    // — including inside a longer word. Dream density is shown by bar height,
+    // not by search, so dream-words isolate like any other query.
+    const match = storiesAt(n).some(storyMatches)
+      || (TOP_TERMS[n] || TOP_TERMS[String(n)] || []).some(t => t[0].includes(q));
 
     rect.style.opacity = match
       ? ((cnt === 0 || cnt === null) ? '0.22' : '1')
